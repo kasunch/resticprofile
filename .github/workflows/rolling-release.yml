@@ -1,0 +1,53 @@
+name: Rolling release
+
+on:
+  push:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Dotenv Action
+        id: dotenv
+        uses: falti/dotenv-action@v1
+        with:
+          path: .github/workflows/env
+
+      - name: Set up Go ${{ steps.dotenv.outputs.go_version }}
+        uses: actions/setup-go@v6
+        with:
+          go-version: ${{ steps.dotenv.outputs.go_version }}
+          cache: true
+
+      - name: Set tag name
+        id: tag
+        run: |
+          BRANCH="${GITHUB_REF_NAME}"
+          SAFE_BRANCH="$(echo "$BRANCH" | sed 's/[^a-zA-Z0-9._-]/-/g')"
+          echo "tag=latest-${SAFE_BRANCH}" >> "$GITHUB_OUTPUT"
+
+      - name: Build static binary
+        run: |
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+            go build -o resticprofile_linux_amd64 -v \
+            -ldflags "-X 'main.commit=${{ github.sha }}' -X 'main.date=$(date -u +%Y-%m-%dT%H:%M:%SZ)' -X 'main.builtBy=github-actions'"
+
+      - name: Update rolling release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: Latest Build (${{ github.ref_name }})
+          body: |
+            Rolling release from `${{ github.ref_name }}` branch.
+            Commit: ${{ github.sha }}
+          prerelease: true
+          make_latest: false
+          files: resticprofile_linux_amd64
